@@ -3,79 +3,103 @@ import time
 import threading
 from DRV8825 import DRV8825
 
-def printOption():
-	print('1. Move to specific location')
-	print('2. Move in a cycle')
-	option = int(input('Enter option: '))
-	return option
+switch_UNDER = GPIO.LOW
+switch_UPPER = GPIO.LOW
+cur_x = 0 #
+cur_y = 0 #
+
+def initLocation(motor):
+	print('initializing motor...')
 	
-def initMotor():
-	print('init motor...')
+	switch_thread1 = threading.Thread(target=monitor_switch, args=(14,))
+	switch_thread2 = threading.Thread(target=monitor_switch, args=(15,))
+	motor_thread1 = threading.Thread(target=toEndUnder, args=(1,0))
+	motor_thread2 = threading.Thread(target=toEndUpper, args=(2,0))
 	
-def moveMotor(direction, steps):
-	smooth = 30
-	Motor1.TurnStep(Dir=direction, steps=steps, stepdelay=0.0015)
-	'''Motor1.TurnStep(Dir=direction, steps=30, stepdelay=0.0015)'''
+	switch_thread1.start()
+	switch_thread2.start()
+	motor_thread1.start()
+	motor_thread2.start()
 	
 
-def moveToSpecificLoc(cur_loc):
-	location = int(input(f'Enter specific location (1 - 4) (current: {cur_loc}) : '))
-	
-	if location == 5:
-		return 5
+def monitor_switch(switch_num):
+	global switch_UNDER
+	global switch_UPPER
+
+	while True:
+		switch_state = GPIO.input(switch_num)
+		if switch_state == GPIO.HIGH:
+			if switch_num == 14:
+				switch_UNDER = GPIO.HIGH
+			else:
+				switch_UPPER = GPIO.HIGH
+			print(f'switch {switch_num} pressed')
+			break
+		else:
+			print(f'switch {switch_num} NOT pressed')
+		time.sleep(0.1)
+
+def toEndUnder(motor_num, direction):
+	while switch_UNDER == GPIO.LOW:
+		moveMotor(motor_num, direction)
 		
-	pulse = 600
-	steps = abs(location-cur_loc) * pulse
+def toEndUpper(motor_num, direction):
+	while switch_UPPER == GPIO.LOW:
+		moveMotor(motor_num, direction)
+
+def moveMotor(motor_num, direction):
+	# 0: toward the motor, 1: far away from the motor
+	motor = Motor1 if motor_num == 1 else Motor2
 	
-	if location - cur_loc > 0:
-		moveMotor('forward', steps)
-	elif location - cur_loc < 0:
-		moveMotor('backward', steps)
-	else:
-		print('Current location is same with the entered location')
+	motor.digital_write(motor.enable_pin, 1)
+	motor.digital_write(motor.dir_pin, direction)
+	motor.digital_write(motor.step_pin, True)
+	time.sleep(0.001)
+	motor.digital_write(motor.step_pin, False)
+	time.sleep(0.001)
+	
+def scan():
+	global Motor1
+	global Motor2
+	
+	x,y = map(int, input('enter x,y: ').split())
+	steps = 300
+	
+	motor1_thread = threading.Thread(target=moveMotor, args=(1,0))
+	motor2_thread = threading.Thread(target=moveMotor, args=(2,0))
 		
 	return location
-				
-	
-def moveInCycle():
-	print('move in a cycle')
 
 def doingJob(motor):
-	motor.TurnStep(Dir='forward', steps=800, stepdelay=0.001)
+	motor.TurnStep(Dir='forward', steps=1600, stepdelay=0.001)
 	time.sleep(0.5)
-	motor.TurnStep(Dir='backward', steps=800, stepdelay=0.001)
+	motor.TurnStep(Dir='backward', steps=1600, stepdelay=0.001)
 	motor.Stop()
 	
+def motorTest():
+	thread1 = threading.Thread(target=doingJob, args=(Motor1,))
+	thread2 = threading.Thread(target=doingJob, args=(Motor2,))
+	
+	thread1.start()
+	thread2.start()
+	
+
+# init stppermotor
+Motor1 = DRV8825(dir_pin=13, step_pin=19, enable_pin=12, mode_pins=(16, 17, 20))
+Motor2 = DRV8825(dir_pin=24, step_pin=18, enable_pin=4, mode_pins=(21, 22, 27))
+Motor1.SetMicroStep('softward' ,'1/8step')    
+Motor2.SetMicroStep('softward' ,'1/8step')  
+
+# init GPIO with pull down resistance
+GPIO.setmode(GPIO.BCM)
+GPIO.setup(14, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
+GPIO.setup(15, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
+
 
 try:
-	Motor1 = DRV8825(dir_pin=13, step_pin=19, enable_pin=12, mode_pins=(16, 17, 20))
-	Motor2 = DRV8825(dir_pin=24, step_pin=18, enable_pin=4, mode_pins=(21, 22, 27))
+	# init motor location
+	initLocation(Motor1)
 	
-	GPIO.setmode(GPIO.BCM)
-	
-	GPIO.setup(12, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
-	GPIO.setup(13, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
-	
-	try:
-		while True:
-			switch_12_state = GPIO.input(12)
-			switch_13_state = GPIO.input(13)
-			
-			if switch_12_state == GPIO.LOW:
-				print("switch 12 pushed")
-			else:
-				print("switch12 not pushed")
-			
-			if switch_13_state == GPIO.LOW:
-				print("switch 13 pushed")
-			else:
-				print("switch 13 not pushed")
-				
-			time.sleep(1)
-			
-	finally:
-		GPIO.cleanup()
-
 	"""
 	# 1.8 degree: nema23, nema14
 	# 200 steps to rotate a circle
@@ -88,26 +112,6 @@ try:
 	# '1/32step': A cycle = 200 * 32 steps
 	Motor1.TurnStep(Dir='backward', steps=4800, stepdelay = 0.001)
 	"""
-	'''
-	Motor1.SetMicroStep('softward','1/16step')
-	
-	initMotor()
-	cur_loc = 1
-	
-	Motor1.TurnStep(Dir='forward', steps=2400, stepdelay = 0.001)
-	while(True):
-		option = printOption()
-		if option==1:
-			while(True):
-				if cur_loc==5:
-					break
-				cur_loc = moveToSpecificLoc(cur_loc)
-		elif option==2:
-			while(True):
-				moveInCycle()
-		else:
-			print('Wrong option. Enter 1 or 2')
-	'''
 
 	"""
 	# 28BJY-48:
@@ -119,37 +123,17 @@ try:
 	# '1/16step': A cycle = 2048 * 16 steps
 	# '1/32step': A cycle = 2048 * 32 steps
 	"""
-	Motor1.SetMicroStep('softward' ,'1/8step')    
-	Motor2.SetMicroStep('softward' ,'1/8step')  
-	
-	'''
-	thread1 = threading.Thread(target=doingJob, args = (Motor1,))
-	thread2 = threading.Thread(target=doingJob, args = (Motor2,))
-	
-	thread1.start()
-	thread2.start()
-	'''
+
 	'''
 	Motor1.TurnStep(Dir='forward', steps=200, stepdelay=0.001)
 	time.sleep(0.5)
 	Motor1.TurnStep(Dir='backward', steps=200, stepdelay=0.001)
 	Motor1.Stop()
 	'''
-	'''
-	  
-	Motor2.TurnStep(Dir='forward', steps=200, stepdelay=0.001)
-	time.sleep(0.5)
-	Motor2.TurnStep(Dir='backward', steps=200, stepdelay=0.001)
-	Motor2.Stop()
-	'''
-
 
 	'''Motor1.Stop()'''
 	'''Motor2.Stop()'''
     
 except:
-    # GPIO.cleanup()
     print("\nMotor stop") 
-    Motor1.Stop()
-    '''Motor2.Stop()'''
     exit()
